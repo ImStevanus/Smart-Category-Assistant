@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import os
 from streamlit_gsheets import GSheetsConnection
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
@@ -8,156 +9,139 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Smart Category Assistant Pro", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="Smart Category Assistant Hybrid", page_icon="🤖", layout="wide")
 
-# URL Google Sheets Stevanus
+# URL Google Sheets Stevanus (Khusus untuk data baru)
 SQL_URL = "https://docs.google.com/spreadsheets/d/1EzAuFcdhr77yDHsO2jwGvYt7wmYBbfAB41LAyOd7nFc/edit?usp=sharing"
 
-# --- KONEKSI DATABASE ---
+# --- KONEKSI ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def load_data_from_gsheets():
-    # Mengambil data terbaru (ttl=0 memastikan data tidak basi)
-    df_raw = conn.read(spreadsheet=SQL_URL, ttl="0")
+def load_hybrid_data():
+    # 1. Load Data Awal dari CSV Lokal
+    if os.path.exists('data_set.csv'):
+        df_csv = pd.read_csv('data_set.csv', on_bad_lines='skip', engine='python')
+    else:
+        df_csv = pd.DataFrame(columns=['Product Name', 'Category', 'tag1', 'tag2', 'tag3', 'tag4', 'tag5'])
+
+    # 2. Load Data Baru dari Google Sheets
+    try:
+        df_gsheets = conn.read(spreadsheet=SQL_URL, ttl="0")
+    except:
+        df_gsheets = pd.DataFrame(columns=['Product Name', 'Category', 'tag1', 'tag2', 'tag3', 'tag4', 'tag5'])
+
+    # 3. Gabungkan Keduanya
+    df_combined = pd.concat([df_csv, df_gsheets], ignore_index=True)
     
-    # Buat copy agar tidak merusak data asli saat manipulasi
-    df = df_raw.copy()
-    
-    # Bersihkan kolom duplikat jika ada
-    df = df.loc[:, ~df.columns.duplicated()]
-    
-    # Pastikan kolom utama tersedia
+    # Bersihkan Data
+    df_combined = df_combined.loc[:, ~df_combined.columns.duplicated()]
     cols_needed = ['Product Name', 'Category', 'tag1', 'tag2', 'tag3', 'tag4', 'tag5']
     for col in cols_needed:
-        if col not in df.columns:
-            df[col] = ""
+        if col not in df_combined.columns:
+            df_combined[col] = ""
     
-    # Memastikan semua data bertipe string dan menangani nilai NaN
-    for col in cols_needed:
-        df[col] = df[col].astype(str).replace(['nan', 'None', 'None'], '')
-
-    # FIX ERROR: Cara penggabungan fitur yang lebih stabil
-    # Menggunakan list comprehension untuk memastikan hasilnya adalah Series tunggal
+    df_combined[cols_needed] = df_combined[cols_needed].astype(str).replace(['nan', 'None'], '')
+    
+    # Gabungkan fitur untuk AI
     feature_cols = ['Category', 'tag1', 'tag2', 'tag3', 'tag4', 'tag5']
-    df['combined_features'] = [
-        ' '.join(filter(None, row)) 
-        for row in df[feature_cols].values
+    df_combined['combined_features'] = [
+        ' '.join(filter(None, row)) for row in df_combined[feature_cols].values
     ]
     
-    return df
+    return df_combined, df_gsheets
 
-# --- ENGINE CLUSTERING ---
+# --- ENGINE AI ---
 @st.cache_resource
 def train_model(df, k):
     if len(df) < k: k = max(1, len(df))
     vectorizer = TfidfVectorizer(stop_words='english')
-    # Fit transform pada kolom teks tunggal
     tfidf_matrix = vectorizer.fit_transform(df['combined_features'])
     model = KMeans(n_clusters=k, random_state=42, n_init=10)
     df['Cluster'] = model.fit_predict(tfidf_matrix)
     return df, vectorizer, model, tfidf_matrix
 
-# --- MAIN INTERFACE ---
+# --- MAIN APP ---
 try:
-    df_raw_loaded = load_data_from_gsheets()
+    # Load data gabungan
+    df_full, df_only_gsheets = load_hybrid_data()
 
     with st.sidebar:
-        st.title("🤖 Cloud Settings")
-        if 'k_val' not in st.session_state: 
-            st.session_state['k_val'] = 10
+        st.title("🤖 Hybrid Assistant")
+        if 'k_val' not in st.session_state: st.session_state['k_val'] = 10
         
-        if not df_raw_loaded.empty and len(df_raw_loaded) > 2:
-            st.subheader("Optimasi Cluster")
-            if st.button("🔍 Cari K Ideal (Silhouette)"):
-                with st.spinner("Menganalisis pola data di Cloud..."):
+        if not df_full.empty and len(df_full) > 2:
+            if st.button("🔍 Cari K Ideal"):
+                with st.spinner("Menganalisis data gabungan..."):
                     best_k, max_score = 2, -1
-                    limit_k = min(15, len(df_raw_loaded) - 1)
-                    
+                    limit_k = min(15, len(df_full) - 1)
                     vec_t = TfidfVectorizer(stop_words='english')
-                    mtx_t = vec_t.fit_transform(df_raw_loaded['combined_features'])
-                    
+                    mtx_t = vec_t.fit_transform(df_full['combined_features'])
                     for kt in range(2, limit_k + 1):
                         km = KMeans(n_clusters=kt, random_state=42, n_init=5)
                         labels = km.fit_predict(mtx_t)
                         score = silhouette_score(mtx_t, labels)
-                        if score > max_score:
-                            max_score = score
-                            best_k = kt
-                    
+                        if score > max_score: max_score, best_k = score, kt
                     st.session_state['k_val'] = best_k
-                    st.success(f"Saran K Terbaik: {best_k}")
+                    st.success(f"Saran K: {best_k}")
 
-        k_val = st.slider("Jumlah Kelompok (K)", 2, 20, st.session_state['k_val'])
-        
-        st.divider()
-        if st.button("🔄 Paksa Sinkronisasi Cloud"):
+        k_val = st.slider("Jumlah Kelompok", 2, 20, st.session_state['k_val'])
+        if st.button("🔄 Refresh Data & AI"):
             st.cache_resource.clear()
             st.rerun()
 
-    if df_raw_loaded.empty:
-        st.warning("Database Google Sheets Kosong! Pastikan Header sudah benar.")
+    if df_full.empty:
+        st.warning("Database kosong! Pastikan file CSV atau Google Sheets tersedia.")
     else:
-        # Jalankan Clustering
-        df, vec, model, matrix = train_model(df_raw_loaded, k_val)
+        # Latih model pada data gabungan
+        df, vec, model, matrix = train_model(df_full, k_val)
 
-        st.title("🚀 Smart Category Assistant (Cloud Mode)")
-        st.markdown("Terhubung ke: `Product_Database` di Google Sheets")
+        st.title("🚀 Smart Category Assistant (Hybrid Mode)")
+        st.caption("Mode: CSV (Lokal) + Google Sheets (Cloud)")
 
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Analitik", "➕ Tambah Produk", "🔍 Eksplorasi Segmen", "📁 Database Live"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Analitik Gabungan", "➕ Input Data Baru", "🔍 Eksplorasi", "📁 Master Data"])
 
         with tab1:
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Total Produk", len(df))
-            m2.metric("Kelompok AI", k_val)
-            m3.metric("Status Server", "Online")
+            c1, c2 = st.columns(2)
+            c1.metric("Total Produk (Gabungan)", len(df))
+            c2.metric("Kelompok AI", k_val)
             
-            # Visualisasi PCA
             pca = PCA(n_components=2)
             coords = pca.fit_transform(matrix.toarray())
             df['x'], df['y'] = coords[:, 0], coords[:, 1]
-            fig = px.scatter(df, x='x', y='y', color='Cluster', 
-                           hover_data=['Product Name', 'Category'], 
-                           template="plotly_white", height=500)
+            fig = px.scatter(df, x='x', y='y', color='Cluster', hover_data=['Product Name'], template="plotly_white")
             st.plotly_chart(fig, use_container_width=True)
 
         with tab2:
-            st.subheader("➕ Tambah Produk Baru ke Cloud")
-            
-            with st.form("gsheets_form", clear_on_submit=True):
+            st.subheader("➕ Simpan Produk Baru ke Cloud")
+            st.write("Data di bawah ini akan disimpan ke Google Sheets (bukan ke CSV lokal).")
+            with st.form("input_form", clear_on_submit=True):
                 f_name = st.text_input("Nama Produk")
-                f_cat = st.text_input("Kategori Utama")
-                f_tag = st.text_area("Tag/Deskripsi (pisahkan dengan spasi)")
-                submitted = st.form_submit_button("Simpan Permanen ke Google Sheets")
-                
+                f_cat = st.text_input("Kategori")
+                f_tag = st.text_area("Tag")
+                submitted = st.form_submit_button("Simpan ke Cloud")
+            
             if submitted and f_name:
                 # Siapkan baris baru
                 tags_list = (f_tag.split() + [""] * 5)[:5]
                 new_row = pd.DataFrame([[f_name, f_cat] + tags_list], 
                                         columns=['Product Name', 'Category', 'tag1', 'tag2', 'tag3', 'tag4', 'tag5'])
                 
-                # Bersihkan data lama dari kolom kalkulasi AI sebelum upload
-                cols_to_keep = ['Product Name', 'Category', 'tag1', 'tag2', 'tag3', 'tag4', 'tag5']
-                clean_old_df = df[cols_to_keep]
-                updated_df = pd.concat([clean_old_df, new_row], ignore_index=True)
+                # Gabungkan data Google Sheets lama dengan data baru
+                updated_gsheets = pd.concat([df_only_gsheets, new_row], ignore_index=True)
                 
-                # Update Google Sheets
-                conn.update(spreadsheet=SQL_URL, data=updated_df)
-                st.success(f"✅ Produk '{f_name}' berhasil disimpan!")
-                
-                # Hapus cache dan refresh
+                # Update hanya ke Google Sheets
+                conn.update(spreadsheet=SQL_URL, data=updated_gsheets)
+                st.success(f"✅ '{f_name}' berhasil disimpan ke Cloud!")
                 st.cache_resource.clear()
                 st.rerun()
 
         with tab3:
             sel_c = st.selectbox("Pilih Cluster:", sorted(df['Cluster'].unique()))
-            st.write(f"Daftar Produk di Cluster {sel_c}:")
             st.dataframe(df[df['Cluster'] == sel_c][['Product Name', 'Category', 'tag1', 'tag2']], use_container_width=True)
 
         with tab4:
-            st.subheader("📁 Tampilan Data Google Sheets")
-            # Menampilkan data asli (tanpa kolom koordinat PCA)
-            st.dataframe(df_raw_loaded.drop(columns=['combined_features'], errors='ignore'), use_container_width=True)
+            st.subheader("📁 Database Master (CSV + Cloud)")
+            st.dataframe(df.drop(columns=['combined_features', 'x', 'y', 'Cluster']), use_container_width=True)
 
 except Exception as e:
-    st.error(f"Terjadi Kendala: {e}")
-    st.info("Saran: Periksa apakah baris pertama Google Sheets berisi header: Product Name, Category, tag1, tag2, tag3, tag4, tag5")
+    st.error(f"Sistem Error: {e}")
