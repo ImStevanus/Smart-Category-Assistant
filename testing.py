@@ -11,7 +11,7 @@ from sklearn.metrics import silhouette_score
 st.set_page_config(page_title="Smart Category Assistant Pro", page_icon="🤖", layout="wide")
 
 # URL Google Sheets Anda
-SQL_URL = "URL_GOOGLE_SHEETS_ANDA" # <--- GANTI INI
+SQL_URL = "https://docs.google.com/spreadsheets/d/1EzAuFcdhr77yDHsO2jwGvYt7wmYBbfAB41LAyOd7nFc/edit?usp=sharing" # <--- GANTI INI
 
 # --- KONEKSI DATABASE ---
 conn = st.connection("gsheets", type=GSheetsConnection)
