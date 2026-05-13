@@ -11,7 +11,7 @@ from sklearn.metrics import silhouette_score
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Smart Category Assistant Hybrid", page_icon="🤖", layout="wide")
 
-# URL Google Sheets Stevanus (Khusus untuk data baru)
+# URL Google Sheets (Data Baru)
 SQL_URL = "https://docs.google.com/spreadsheets/d/1EzAuFcdhr77yDHsO2jwGvYt7wmYBbfAB41LAyOd7nFc/edit?usp=sharing"
 
 # --- KONEKSI ---
@@ -33,19 +33,27 @@ def load_hybrid_data():
     # 3. Gabungkan Keduanya
     df_combined = pd.concat([df_csv, df_gsheets], ignore_index=True)
     
-    # Bersihkan Data
+    # Bersihkan kolom duplikat
     df_combined = df_combined.loc[:, ~df_combined.columns.duplicated()]
+    
+    # Kolom yang wajib ada
     cols_needed = ['Product Name', 'Category', 'tag1', 'tag2', 'tag3', 'tag4', 'tag5']
     for col in cols_needed:
         if col not in df_combined.columns:
             df_combined[col] = ""
     
-    df_combined[cols_needed] = df_combined[cols_needed].astype(str).replace(['nan', 'None'], '')
+    # --- FIX ERROR: Konversi semua ke string dan tangani NaN ---
+    df_combined[cols_needed] = df_combined[cols_needed].fillna('').astype(str)
     
-    # Gabungkan fitur untuk AI
+    # Menghapus string 'nan' yang sering muncul saat konversi float ke str
+    df_combined[cols_needed] = df_combined[cols_needed].replace(['nan', 'None', '<NA>'], '')
+
+    # Gabungkan fitur untuk AI dengan proteksi tipe data
     feature_cols = ['Category', 'tag1', 'tag2', 'tag3', 'tag4', 'tag5']
+    # Menggunakan filter(None, ...) untuk membuang string kosong saat penggabungan
     df_combined['combined_features'] = [
-        ' '.join(filter(None, row)) for row in df_combined[feature_cols].values
+        ' '.join(filter(None, [str(val) for val in row])) 
+        for row in df_combined[feature_cols].values
     ]
     
     return df_combined, df_gsheets
@@ -54,15 +62,17 @@ def load_hybrid_data():
 @st.cache_resource
 def train_model(df, k):
     if len(df) < k: k = max(1, len(df))
+    # Vectorizer akan mengubah teks menjadi matriks angka
     vectorizer = TfidfVectorizer(stop_words='english')
     tfidf_matrix = vectorizer.fit_transform(df['combined_features'])
+    
     model = KMeans(n_clusters=k, random_state=42, n_init=10)
     df['Cluster'] = model.fit_predict(tfidf_matrix)
+    
     return df, vectorizer, model, tfidf_matrix
 
 # --- MAIN APP ---
 try:
-    # Load data gabungan
     df_full, df_only_gsheets = load_hybrid_data()
 
     with st.sidebar:
@@ -71,7 +81,7 @@ try:
         
         if not df_full.empty and len(df_full) > 2:
             if st.button("🔍 Cari K Ideal"):
-                with st.spinner("Menganalisis data gabungan..."):
+                with st.spinner("Menganalisis..."):
                     best_k, max_score = 2, -1
                     limit_k = min(15, len(df_full) - 1)
                     vec_t = TfidfVectorizer(stop_words='english')
@@ -92,44 +102,43 @@ try:
     if df_full.empty:
         st.warning("Database kosong! Pastikan file CSV atau Google Sheets tersedia.")
     else:
-        # Latih model pada data gabungan
         df, vec, model, matrix = train_model(df_full, k_val)
 
-        st.title("🚀 Smart Category Assistant (Hybrid Mode)")
+        st.title("🚀 Smart Category Assistant (Hybrid)")
         st.caption("Mode: CSV (Lokal) + Google Sheets (Cloud)")
 
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Analitik Gabungan", "➕ Input Data Baru", "🔍 Eksplorasi", "📁 Master Data"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Analitik", "➕ Tambah Produk", "🔍 Eksplorasi", "📁 Master Data"])
 
         with tab1:
             c1, c2 = st.columns(2)
-            c1.metric("Total Produk (Gabungan)", len(df))
+            c1.metric("Total Produk", len(df))
             c2.metric("Kelompok AI", k_val)
             
+            # Visualisasi Kedekatan Produk
             pca = PCA(n_components=2)
             coords = pca.fit_transform(matrix.toarray())
             df['x'], df['y'] = coords[:, 0], coords[:, 1]
-            fig = px.scatter(df, x='x', y='y', color='Cluster', hover_data=['Product Name'], template="plotly_white")
+            fig = px.scatter(df, x='x', y='y', color='Cluster', 
+                           hover_data=['Product Name', 'Category'], template="plotly_white")
             st.plotly_chart(fig, use_container_width=True)
 
         with tab2:
-            st.subheader("➕ Simpan Produk Baru ke Cloud")
-            st.write("Data di bawah ini akan disimpan ke Google Sheets (bukan ke CSV lokal).")
+            st.subheader("➕ Simpan ke Google Sheets")
             with st.form("input_form", clear_on_submit=True):
                 f_name = st.text_input("Nama Produk")
                 f_cat = st.text_input("Kategori")
                 f_tag = st.text_area("Tag")
-                submitted = st.form_submit_button("Simpan ke Cloud")
+                submitted = st.form_submit_button("Simpan Permanen")
             
             if submitted and f_name:
-                # Siapkan baris baru
                 tags_list = (f_tag.split() + [""] * 5)[:5]
                 new_row = pd.DataFrame([[f_name, f_cat] + tags_list], 
                                         columns=['Product Name', 'Category', 'tag1', 'tag2', 'tag3', 'tag4', 'tag5'])
                 
-                # Gabungkan data Google Sheets lama dengan data baru
-                updated_gsheets = pd.concat([df_only_gsheets, new_row], ignore_index=True)
+                # Pastikan data gsheets lama dibersihkan dari kolom AI sebelum digabung
+                clean_gsheets = df_only_gsheets.copy()
+                updated_gsheets = pd.concat([clean_gsheets, new_row], ignore_index=True)
                 
-                # Update hanya ke Google Sheets
                 conn.update(spreadsheet=SQL_URL, data=updated_gsheets)
                 st.success(f"✅ '{f_name}' berhasil disimpan ke Cloud!")
                 st.cache_resource.clear()
@@ -140,7 +149,7 @@ try:
             st.dataframe(df[df['Cluster'] == sel_c][['Product Name', 'Category', 'tag1', 'tag2']], use_container_width=True)
 
         with tab4:
-            st.subheader("📁 Database Master (CSV + Cloud)")
+            st.subheader("📁 Database Master (Gabungan)")
             st.dataframe(df.drop(columns=['combined_features', 'x', 'y', 'Cluster']), use_container_width=True)
 
 except Exception as e:
