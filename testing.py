@@ -52,7 +52,6 @@ def get_model_cluster_mapping(model, scaler, features, mode):
     centroids_original = scaler.inverse_transform(centroids_scaled)
     df_centroids = pd.DataFrame(centroids_original, columns=features)
     
-    # Menghitung bobot performa berdasarkan mode parameter pilihan user
     if mode == "Hanya Nilai Ujian (Mid & Final)":
         df_centroids['academic_score'] = df_centroids['midterm_marks'] + df_centroids['final_marks']
     else:
@@ -98,7 +97,7 @@ def get_cluster_static_info(category_name):
             "color": "#e74c3c"
         }
 
-# 5. SIDEBAR NAVIGATION & KONFIGURASI MODEL GABUNGAN
+# 5. SIDEBAR NAVIGATION
 with st.sidebar:
     st.title("🎓 Smart Campus AI")
     st.markdown(f"User: **Stevanus**\n\nTema: **Academic Clustering**")
@@ -121,7 +120,6 @@ if model is None or scaler is None:
 else:
     features = ['quiz1_marks', 'quiz2_marks', 'quiz3_marks', 'midterm_marks', 'final_marks', 'previous_gpa', 'lectures_attended', 'labs_attended']
     
-    # Jalankan pemetaan peringkat otomatis sesuai pilihan parameter di sidebar
     cluster_mapping = get_model_cluster_mapping(model, scaler, features, parameter_mode)
 
     # --- MENU 1: DASHBOARD ANALISIS MASSAL ---
@@ -132,7 +130,6 @@ else:
         if uploaded_file is not None:
             df = pd.read_csv(uploaded_file)
             
-            # Preprocessing & Clustering data massal
             df_clean = df[features].fillna(df[features].mean())
             scaled_data = scaler.transform(df_clean)
             df['Cluster'] = model.predict(scaled_data)
@@ -152,14 +149,14 @@ else:
             
             st.divider()
 
-            # FITUR BARU: DROP-DOWN INTERAKTIF PADA DASHBOARD UNTUK MEMILIH SUMBU GRAFIK
+            # DROP-DOWN INTERAKTIF DASHBOARD
             st.subheader("🎛️ Pengaturan Sumbu Visualisasi")
             c_select1, c_select2 = st.columns(2)
             with c_select1:
                 x_param = st.selectbox(
                     "Pilih Parameter Sumbu X (Horizontal):",
                     options=["quiz1_marks", "quiz2_marks", "quiz3_marks", "lectures_attended", "labs_attended", "midterm_marks"],
-                    index=3, # Default ke lectures_attended
+                    index=5, # Default ke midterm_marks
                     format_func=lambda x: {
                         "quiz1_marks": "📝 Nilai Quiz 1",
                         "quiz2_marks": "📝 Nilai Quiz 2",
@@ -173,21 +170,20 @@ else:
                 y_param = st.selectbox(
                     "Pilih Parameter Sumbu Y (Vertikal):",
                     options=["final_marks", "previous_gpa"],
-                    index=0, # Default ke final_marks
+                    index=0, 
                     format_func=lambda x: {
                         "final_marks": "📊 Nilai Final Exam",
                         "previous_gpa": "📈 IPK Sebelumnya (GPA)"
                     }.get(x)
                 )
 
-            # PANEL VISUALISASI DATA GRAPH (DINAMIS MENGIKUTI DROP DOWN)
+            # PANEL VISUALISASI DATA GRAPH
             col_left, col_right = st.columns([6, 4])
             
             with col_left:
                 st.markdown(f"##### 📍 Sebaran Cluster Berdasarkan Pilihan Parameter")
                 fig = px.scatter(df, x=x_param, y=y_param, color="Cluster_Name", 
-                                 template="none", labels={x_param: "Parameter X", y_param: "Parameter Y"},
-                                 color_discrete_map={
+                                 template="none", color_discrete_map={
                                      get_cluster_static_info("Tinggi")['label']: "#2ecc71",
                                      get_cluster_static_info("Menengah")['label']: "#f1c40f",
                                      get_cluster_static_info("Berisiko")['label']: "#e74c3c"
@@ -211,7 +207,7 @@ else:
         else:
             st.info("Silakan unggah dataset 'student_dropout_behavior_dataset.csv' pada sidebar untuk melihat analisis kelompok.")
 
-    # --- MENU 2: PREDIKSI INDIVIDU BARU ---
+    # --- MENU 2: PREDIKSI INDIVIDU BARU (DENGAN SAKLAR DARURAT MUTLAK) ---
     else:
         st.title("🔍 Prediksi Kategori Mahasiswa")
         st.info(f"💡 Aturan Evaluasi Berdasarkan: **{parameter_mode}**")
@@ -220,40 +216,43 @@ else:
         with st.form("prediction_form"):
             c1, c2 = st.columns(2)
             with c1:
-                q1 = st.slider("Quiz 1", 0.0, 10.0, 5.0)
-                q2 = st.slider("Quiz 2", 0.0, 10.0, 5.0)
-                q3 = st.slider("Quiz 3", 0.0, 10.0, 5.0)
+                q1 = st.slider("Quiz 1", 0.0, 10.0, 0.0)
+                q2 = st.slider("Quiz 2", 0.0, 10.0, 0.0)
+                q3 = st.slider("Quiz 3", 0.0, 10.0, 0.0)
                 mid = st.number_input("Midterm Marks (0-30)", 0, 30, 0)
             with c2:
                 fin = st.number_input("Final Marks (0-50)", 0, 50, 0)
-                gpa = st.slider("Previous GPA (0.0-4.0)", 0.0, 4.0, 2.0)
-                lec = st.number_input("Lectures Attended (0-12)", 0, 12, 6)
-                lab = st.number_input("Labs Attended (0-6)", 0, 6, 3)
+                gpa = st.slider("Previous GPA (0.0-4.0)", 0.0, 4.0, 0.0)
+                lec = st.number_input("Lectures Attended (0-12)", 0, 12, 0)
+                lab = st.number_input("Labs Attended (0-6)", 0, 6, 0)
             
             submit = st.form_submit_button("🚀 Analisis Performa")
 
         if submit:
-            # Mengemas data input ke bentuk DataFrame
-            input_df = pd.DataFrame([[q1, q2, q3, mid, fin, gpa, lec, lab]], columns=features)
-            scaled_input = scaler.transform(input_df)
-            predicted_cluster = model.predict(scaled_input)[0]
-            
-            # LOGIKA ADAPTIF UNTUK INPUT NILAI EKSTREM (Quiz 0 & Final 0)
-            if parameter_mode == "Hanya Nilai Ujian (Mid & Final)":
-                if fin == 0 and mid == 0:
-                    assigned_category = "Berisiko"
-                else:
-                    assigned_category = cluster_mapping.get(predicted_cluster, "Menengah")
+            # 🛑 SAKLAR DARURAT UTAMA (MUTLAK):
+            # Jika user memasukkan nilai ujian utama = 0, potong jalur K-Means dan kunci ke "Berisiko"
+            if mid == 0 and fin == 0:
+                assigned_category = "Berisiko"
             else:
-                total_skor = fin + mid + q1 + q2 + q3
-                if total_skor <= 45.0 or (fin == 0 and mid == 0) or lec <= 3:
-                    assigned_category = "Berisiko"
-                else:
+                # Jika nilai tidak nol, jalankan prediksi normal lewat K-Means model .pkl
+                input_df = pd.DataFrame([[q1, q2, q3, mid, fin, gpa, lec, lab]], columns=features)
+                scaled_input = scaler.transform(input_df)
+                predicted_cluster = model.predict(scaled_input)[0]
+                
+                # Cek filter berdasarkan dropdown sidebar
+                if parameter_mode == "Hanya Nilai Ujian (Mid & Final)":
                     assigned_category = cluster_mapping.get(predicted_cluster, "Menengah")
+                else:
+                    total_skor = fin + mid + q1 + q2 + q3
+                    if total_skor <= 45.0:
+                        assigned_category = "Berisiko"
+                    else:
+                        assigned_category = cluster_mapping.get(predicted_cluster, "Menengah")
             
+            # Ambil visualisasi teks dan warna berdasarkan kategori akhir yang sudah dikunci
             info = get_cluster_static_info(assigned_category)
             
-            # CETAK KARTU HASIL
+            # CETAK KARTU HASIL PREDIKSI
             st.markdown(f"""
                 <div style="background-color:{info['color']}; padding:30px; border-radius:15px; text-align:center; color:white;">
                     <h1 style="color:white; margin:0;">{info['label']}</h1>
