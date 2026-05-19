@@ -31,7 +31,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. FUNGSI LOAD ASSETS & PEMETAAN KLASTER SECARA AKURAT
+# 3. FUNGSI LOAD ASSETS
 @st.cache_resource
 def load_assets():
     try:
@@ -43,35 +43,35 @@ def load_assets():
 
 model, scaler = load_assets()
 
-# FITUR UTAMA: Membuat mapping klaster berdasarkan bobot nilai riil di dalam model K-Means
+# 4. FUNSI ADAPTIF: Pemetaan Kategori Sesuai Karakteristik Dataset (Skala Nilai Ujian Kumulatif Max: 110)
 def get_accurate_cluster_mapping(model, scaler, features):
     if model is None or scaler is None:
         return {0: "Tinggi", 1: "Menengah", 2: "Berisiko"}
     
-    # Ambil titik pusat klaster (Cluster Centers) dalam bentuk skala asli (sebelum di-scale)
+    # Ambil titik pusat klaster (Cluster Centers) dan balikkan ke skala asli
     centroids_scaled = model.cluster_centers_
     centroids_original = scaler.inverse_transform(centroids_scaled)
     
     df_centroids = pd.DataFrame(centroids_original, columns=features)
     
-    # Hitung performa berdasarkan total kontribusi nilai krusial (Final + Midterm + Rata-rata Quiz)
+    # Hitung performa akademis kumulatif berdasarkan komponen ujian utama
     df_centroids['performance_score'] = (
         df_centroids['final_marks'] + 
         df_centroids['midterm_marks'] + 
         (df_centroids['quiz1_marks'] + df_centroids['quiz2_marks'] + df_centroids['quiz3_marks'])
     )
     
-    # Urutkan index klaster dari skor tertinggi ke terendah
-    sorted_clusters = df_centroids['performance_score'].sort_values(ascending=False).index.tolist()
-    
     mapping = {}
-    if len(sorted_clusters) >= 3:
-        mapping[sorted_clusters[0]] = "Tinggi"
-        mapping[sorted_clusters[1]] = "Menengah"
-        mapping[sorted_clusters[2]] = "Berisiko"
-    else:
-        for idx, c_id in enumerate(sorted_clusters):
-            mapping[c_id] = "Tinggi" if idx == 0 else "Berisiko"
+    for cluster_idx, row in df_centroids.iterrows():
+        score = row['performance_score']
+        
+        # Penyesuaian Kategori Berdasarkan Distribusi Skor Total Dataset
+        if score < 55.0:       # Mengumpulkan nilai < 50% dari total poin ujian
+            mapping[cluster_idx] = "Berisiko"
+        elif score < 78.0:     # Berada di rentang nilai rata-rata kelompok (50% - 70%)
+            mapping[cluster_idx] = "Menengah"
+        else:                  # Mengumpulkan nilai > 70% dari total poin ujian
+            mapping[cluster_idx] = "Tinggi"
             
     return mapping
 
@@ -81,26 +81,26 @@ def get_cluster_info(cluster_num, mapping_dict):
     if status == "Tinggi":
         return {
             "label": "🚀 High Achiever (Performa Tinggi)",
-            "desc": "Mahasiswa dengan metrik akademis keseluruhan di atas rata-rata kelompok dan kehadiran sangat konsisten.",
+            "desc": "Mahasiswa dengan akumulasi nilai ujian yang sangat baik (di atas 70% dari total bobot nilai) dan konsisten.",
             "saran": "Pertahankan ritme belajar. Sangat direkomendasikan menjadi asisten dosen atau mentor sebaya.",
             "color": "#2ecc71"
         }
     elif status == "Menengah":
         return {
             "label": "📊 Steady / Average (Performa Menengah)",
-            "desc": "Mahasiswa menunjukkan performa stabil pada tingkat rata-rata, namun memiliki ruang untuk peningkatan pada aspek nilai ujian atau lab.",
+            "desc": "Mahasiswa menunjukkan performa stabil pada tingkat rata-rata kelompok, namun memiliki ruang peningkatan pada aspek nilai ujian utama.",
             "saran": "Fokus meningkatkan nilai ujian utama dan tugas harian untuk mengamankan nilai akhir.",
             "color": "#f1c40f"
         }
-    else:
+    else: # Berisiko
         return {
             "label": "⚠️ Underperformer (Performa Berisiko)",
-            "desc": "Nilai ujian cenderung rendah atau tingkat kehadiran di bawah batas minimum kelompok. Berisiko tinggi mengalami kendala kelulusan.",
+            "desc": "Akumulasi nilai ujian sangat rendah (di bawah 50% dari total bobot nilai). Berisiko tinggi mengalami kendala kelulusan.",
             "saran": "Segera jadwalkan sesi bimbingan konseling akademik untuk pemulihan nilai.",
             "color": "#e74c3c"
         }
 
-# 4. SIDEBAR
+# 5. SIDEBAR NAVIGATION & FILE UPLOADER
 with st.sidebar:
     st.title("🎓 Smart Campus AI")
     st.markdown(f"User: **Stevanus**\n\nTema: **Academic Clustering**")
@@ -109,13 +109,14 @@ with st.sidebar:
     st.divider()
     uploaded_file = st.file_uploader("Upload Dataset CSV", type="csv")
 
-# 5. LOGIKA UTAMA
+# 6. LOGIKA UTAMA APLIKASI
 if model is None or scaler is None:
     st.error("❌ File model (.pkl) tidak ditemukan. Pastikan sudah menjalankan training di Colab!")
 else:
+    # 8 Fitur utama yang digunakan sesuai dengan model training
     features = ['quiz1_marks', 'quiz2_marks', 'quiz3_marks', 'midterm_marks', 'final_marks', 'previous_gpa', 'lectures_attended', 'labs_attended']
     
-    # Jalankan fungsi mapping akurat secara otomatis dari model `.pkl`
+    # Jalankan pemetaan otomatis berdasarkan matematika model pkl riil
     cluster_mapping = get_accurate_cluster_mapping(model, scaler, features)
 
     # --- MENU 1: DASHBOARD ANALISIS ---
@@ -125,22 +126,22 @@ else:
         if uploaded_file is not None:
             df = pd.read_csv(uploaded_file)
             
-            # Preprocessing & Clustering
+            # Preprocessing & Clustering data baru
             df_clean = df[features].fillna(df[features].mean())
             scaled_data = scaler.transform(df_clean)
             df['Cluster'] = model.predict(scaled_data)
             
-            # BAGIAN METRIK
+            # PANEL RINGKASAN METRIK
             st.subheader("📌 Ringkasan Data Saat Ini")
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Total Mahasiswa", len(df))
             m2.metric("Rata-rata Final", f"{df['final_marks'].mean():.1f}")
             m3.metric("Rata-rata IPK", f"{df['previous_gpa'].mean():.2f}")
-            m4.metric("Kategori Cluster", len(df['Cluster'].unique()))
+            m4.metric("Kategori Cluster Terdeteksi", len(df['Cluster'].unique()))
             
             st.divider()
 
-            # VISUALISASI
+            # PANEL VISUALISASI DATA
             col_left, col_right = st.columns([6, 4])
             
             with col_left:
@@ -156,7 +157,7 @@ else:
                 st.plotly_chart(fig_pie, use_container_width=True)
 
             st.subheader("📋 Eksplorasi Data Lengkap")
-            cl_filter = st.multiselect("Filter Cluster:", options=sorted(df['Cluster'].unique()), default=df['Cluster'].unique())
+            cl_filter = st.multiselect("Filter Tampilan Cluster:", options=sorted(df['Cluster'].unique()), default=df['Cluster'].unique())
             st.dataframe(df[df['Cluster'].isin(cl_filter)], use_container_width=True)
             
         else:
@@ -165,7 +166,7 @@ else:
     # --- MENU 2: PREDIKSI INDIVIDU ---
     else:
         st.title("🔍 Prediksi Kategori Mahasiswa")
-        st.write("Masukkan parameter akademis mahasiswa di bawah ini:")
+        st.write("Masukkan parameter akademis mahasiswa di bawah ini untuk melihat hasil prediksi kelompok:")
 
         with st.form("prediction_form"):
             c1, c2 = st.columns(2)
@@ -173,24 +174,25 @@ else:
                 q1 = st.slider("Quiz 1", 0.0, 10.0, 0.0)
                 q2 = st.slider("Quiz 2", 0.0, 10.0, 0.0)
                 q3 = st.slider("Quiz 3", 0.0, 10.0, 0.0)
-                mid = st.number_input("Midterm Marks (0-100)", 0, 100, 0)
+                mid = st.number_input("Midterm Marks (0-30)", 0, 30, 0)
             with c2:
-                fin = st.number_input("Final Marks (0-100)", 0, 100, 0)
+                fin = st.number_input("Final Marks (0-50)", 0, 50, 0)
                 gpa = st.slider("Previous GPA (0.0-4.0)", 0.0, 4.0, 0.0)
-                lec = st.number_input("Lectures Attended", 0, 12, 0)
-                lab = st.number_input("Labs Attended", 0, 6, 0)
+                lec = st.number_input("Lectures Attended (0-12)", 0, 12, 0)
+                lab = st.number_input("Labs Attended (0-6)", 0, 6, 0)
             
             submit = st.form_submit_button("🚀 Analisis Performa")
 
         if submit:
+            # Mengemas input ke dalam bentuk dataframe sesuai urutan fitur training
             input_df = pd.DataFrame([[q1, q2, q3, mid, fin, gpa, lec, lab]], columns=features)
             scaled_input = scaler.transform(input_df)
             res = model.predict(scaled_input)[0]
             
-            # Panggil info dengan mapping berbasis matematika model riil
+            # Panggil info klasifikasi berdasarkan perhitungan dinamis dari model pkl
             info = get_cluster_info(res, cluster_mapping)
             
-            # Kartu Hasil yang Mencolok
+            # Tampilan hasil prediksi berupa kartu berwarna yang informatif
             st.markdown(f"""
                 <div style="background-color:{info['color']}; padding:30px; border-radius:15px; text-align:center; color:white;">
                     <h1 style="color:white; margin:0;">{info['label']}</h1>
@@ -201,6 +203,6 @@ else:
                 </div>
                 """, unsafe_allow_html=True)
 
-# 7. FOOTER
+# 7. FOOTER APLIKASI
 st.divider()
-st.caption(f"UAS Pemrograman AI - Stevanus - {len(features)} Fitur Teranalisis")
+st.caption(f"UAS Pemrograman AI - Stevanus - {len(features)} Fitur Teranalisis Berbasis Dataset Riil")
