@@ -43,24 +43,27 @@ def load_assets():
 
 model, scaler = load_assets()
 
-# 4. FUNGSI PEMETAAN OTOMATIS BERDASARKAN PARAMETER UTAMA (MID & FINAL) DI MODEL PKL
-def get_model_cluster_mapping(model, scaler, features):
+# 4. FUNGSI PEMETAAN OTOMATIS BERDASARKAN MODE PARAMETER YANG DIPILIH
+def get_model_cluster_mapping(model, scaler, features, mode):
     if model is None or scaler is None:
         return {0: "Tinggi", 1: "Menengah", 2: "Berisiko"}
     
-    # Ambil titik pusat klaster (Cluster Centers) dan kembalikan ke skala asli dataset
     centroids_scaled = model.cluster_centers_
     centroids_original = scaler.inverse_transform(centroids_scaled)
     df_centroids = pd.DataFrame(centroids_original, columns=features)
     
-    # K-Means mengelompokkan berdasarkan parameter Midterm dan Final
-    # Kita hitung performa klaster berdasarkan jumlah rata-rata kedua parameter utama ini
-    df_centroids['academic_score'] = df_centroids['midterm_marks'] + df_centroids['final_marks']
+    # Menghitung bobot performa berdasarkan mode parameter pilihan user
+    if mode == "Hanya Nilai Ujian (Mid & Final)":
+        df_centroids['academic_score'] = df_centroids['midterm_marks'] + df_centroids['final_marks']
+    else:
+        df_centroids['academic_score'] = (
+            df_centroids['final_marks'] + 
+            df_centroids['midterm_marks'] + 
+            (df_centroids['quiz1_marks'] + df_centroids['quiz2_marks'] + df_centroids['quiz3_marks'])
+        )
     
-    # Urutkan indeks klaster berdasarkan performa dari TERTINGGI ke TERENDAH
     sorted_clusters = df_centroids['academic_score'].sort_values(ascending=False).index.tolist()
     
-    # Petakan ranking secara dinamis ke 3 kategori
     mapping = {}
     if len(sorted_clusters) >= 3:
         mapping[sorted_clusters[0]] = "Tinggi"
@@ -76,29 +79,38 @@ def get_cluster_static_info(category_name):
     if category_name == "Tinggi":
         return {
             "label": "🚀 High Achiever (Performa Tinggi)",
-            "desc": "Mahasiswa menunjukkan hasil evaluasi Midterm dan Final Exam yang sangat memuaskan di atas rata-rata kelas.",
-            "saran": "Pertahankan ritme belajar saat ini. Sangat direkomendasikan untuk menjadi asisten dosen atau mentor sebaya.",
-            "color": "#2ecc71" # Hijau
+            "desc": "Mahasiswa menunjukkan hasil evaluasi parameter terpilih yang sangat memuaskan di atas rata-rata kelas.",
+            "saran": "Pertahankan ritme belajar saat ini. Direkomendasikan menjadi asisten dosen atau mentor sebaya.",
+            "color": "#2ecc71"
         }
     elif category_name == "Menengah":
         return {
             "label": "📊 Steady / Average (Performa Menengah)",
-            "desc": "Mahasiswa menunjukkan hasil evaluasi Midterm dan Final Exam yang cukup stabil di tingkat rata-rata kelompok kelas.",
-            "saran": "Fokus meningkatkan pemahaman pada materi inti perkuliahan untuk mendongkrak pencapaian nilai ujian berikutnya.",
-            "color": "#f1c40f" # Kuning
+            "desc": "Mahasiswa menunjukkan hasil evaluasi parameter terpilih yang cukup stabil di tingkat rata-rata kelompok kelas.",
+            "saran": "Fokus meningkatkan pemahaman materi inti perkuliahan untuk mendongkrak pencapaian berikutnya.",
+            "color": "#f1c40f"
         }
     else: # Berisiko
         return {
             "label": "⚠️ Underperformer (Performa Berisiko)",
-            "desc": "Hasil evaluasi Midterm dan Final Exam berada di tingkat kritis. Risiko tinggi mengalami kendala kelulusan mata kuliah.",
-            "saran": "Segera jadwalkan sesi bimbingan konseling akademik intensif bersama dosen wali untuk perbaikan nilai.",
-            "color": "#e74c3c" # Merah
+            "desc": "Hasil evaluasi parameter kritis berada di tingkat rendah. Risiko tinggi mengalami kendala kelulusan studi.",
+            "saran": "Segera jadwalkan sesi bimbingan konseling akademik intensif bersama dosen wali untuk pemulihan nilai.",
+            "color": "#e74c3c"
         }
 
-# 5. SIDEBAR NAVIGATION
+# 5. SIDEBAR NAVIGATION & FITUR BARU: PILIH PARAMETER
 with st.sidebar:
     st.title("🎓 Smart Campus AI")
     st.markdown(f"User: **Stevanus**\n\nTema: **Academic Clustering**")
+    st.divider()
+    
+    # REKAYASA FITUR BARU BARU DI SINI:
+    st.subheader("⚙️ Konfigurasi Model")
+    parameter_mode = st.selectbox(
+        "Pilih Parameter Analisis:",
+        ["Hanya Nilai Ujian (Mid & Final)", "Semua Parameter Akademik Terintegrasi"]
+    )
+    
     st.divider()
     menu = st.radio("Navigasi Utama", ["🏠 Dashboard Analisis", "🔍 Prediksi Individu"])
     st.divider()
@@ -108,29 +120,28 @@ with st.sidebar:
 if model is None or scaler is None:
     st.error("❌ File model (.pkl) tidak ditemukan. Pastikan sudah menjalankan training di Colab!")
 else:
-    # 8 Fitur utama sesuai urutan matriks training data
     features = ['quiz1_marks', 'quiz2_marks', 'quiz3_marks', 'midterm_marks', 'final_marks', 'previous_gpa', 'lectures_attended', 'labs_attended']
     
-    # Jalankan pemetaan peringkat otomatis dari model .pkl berdasarkan parameter Mid + Final
-    cluster_mapping = get_model_cluster_mapping(model, scaler, features)
+    # Jalankan pemetaan otomatis sesuai pilihan parameter di sidebar
+    cluster_mapping = get_model_cluster_mapping(model, scaler, features, parameter_mode)
 
     # --- MENU 1: DASHBOARD ANALISIS MASSAL ---
     if menu == "🏠 Dashboard Analisis":
         st.title("📊 Dashboard Analisis Performa Mahasiswa")
+        st.info(f"💡 Mode Analisis Aktif: **{parameter_mode}**")
         
         if uploaded_file is not None:
             df = pd.read_csv(uploaded_file)
             
-            # Preprocessing & Clustering data massal menggunakan K-Means (.pkl)
+            # Preprocessing & Clustering data massal
             df_clean = df[features].fillna(df[features].mean())
             scaled_data = scaler.transform(df_clean)
             df['Cluster'] = model.predict(scaled_data)
             
-            # Terapkan label kategori hasil pemetaan otomatis model pkl
             df['Kategori_Evaluasi'] = df['Cluster'].map(cluster_mapping)
             df['Cluster_Name'] = df['Kategori_Evaluasi'].apply(lambda x: get_cluster_static_info(x)['label'])
             
-            # PANEL RINGKASAN METRIK (Aman untuk Dark Mode)
+            # PANEL RINGKASAN METRIK
             st.subheader("📌 Ringkasan Data Saat Ini")
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Total Mahasiswa", len(df))
@@ -172,10 +183,11 @@ else:
         else:
             st.info("Silakan unggah dataset 'student_dropout_behavior_dataset.csv' pada sidebar untuk melihat analisis kelompok.")
 
-    # --- MENU 2: PREDIKSI INDIVIDU BARU (PATUH PADA K-MEANS) ---
+    # --- MENU 2: PREDIKSI INDIVIDU BARU ---
     else:
         st.title("🔍 Prediksi Kategori Mahasiswa")
-        st.write("Masukkan parameter akademis mahasiswa di bawah ini untuk melihat hasil prediksi kelompok:")
+        st.info(f"💡 Aturan Evaluasi Berdasarkan: **{parameter_mode}**")
+        st.write("Masukkan parameter akademis mahasiswa di bawah ini:")
 
         with st.form("prediction_form"):
             c1, c2 = st.columns(2)
@@ -193,30 +205,39 @@ else:
             submit = st.form_submit_button("🚀 Analisis Performa")
 
         if submit:
-            # Mengemas input data baru ke bentuk DataFrame
+            # Mengemas data input ke bentuk DataFrame
             input_df = pd.DataFrame([[q1, q2, q3, mid, fin, gpa, lec, lab]], columns=features)
             scaled_input = scaler.transform(input_df)
-            
-            # Prediksi klaster asli menggunakan K-Means .pkl
             predicted_cluster = model.predict(scaled_input)[0]
             
-            # Terjemahkan nomor cluster hasil prediksi ke label kategori ("Tinggi"/"Menengah"/"Berisiko")
-            assigned_category = cluster_mapping.get(predicted_cluster, "Menengah")
+            # LOGIKA ADAPTIF UNTUK INPUT NILAI EKSTREM (Quiz 0 & Final 0)
+            if parameter_mode == "Hanya Nilai Ujian (Mid & Final)":
+                # Proteksi khusus jika hanya mengukur Mid & Final
+                if fin == 0 and mid == 0:
+                    assigned_category = "Berisiko"
+                else:
+                    assigned_category = cluster_mapping.get(predicted_cluster, "Menengah")
+            else:
+                # Proteksi jika mengukur semua parameter gabungan
+                total_skor = fin + mid + q1 + q2 + q3
+                if total_skor <= 45.0 or (fin == 0 and mid == 0):
+                    assigned_category = "Berisiko"
+                else:
+                    assigned_category = cluster_mapping.get(predicted_cluster, "Menengah")
             
-            # Ambil informasi visual dan teks rekomendasi
             info = get_cluster_static_info(assigned_category)
             
-            # CETAK KARTU HASIL PREDIKSI BARU
+            # CETAK KARTU HASIL
             st.markdown(f"""
                 <div style="background-color:{info['color']}; padding:30px; border-radius:15px; text-align:center; color:white;">
                     <h1 style="color:white; margin:0;">{info['label']}</h1>
                     <p style="font-size:1.2em; margin:15px 0;">{info['desc']}</p>
                     <div style="background-color:rgba(0,0,0,0.15); padding:15px; border-radius:10px;">
-                        <b>💡 Rekomendasi Akademik:</b> {info['saran']}
+                        <b>💡 Rekomendasi Sistem:</b> {info['saran']}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
 
 # 7. FOOTER APLIKASI
 st.divider()
-st.caption(f"UAS Pemrograman AI - Stevanus - K-Means Clustering Teroptimasi (Parameter Evaluasi: Midterm & Final)")
+st.caption(f"UAS Pemrograman AI - Stevanus - Sistem Klaster Komparatif Dinamis")
