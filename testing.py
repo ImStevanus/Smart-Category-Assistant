@@ -43,28 +43,28 @@ def load_assets():
 
 model, scaler = load_assets()
 
-# 4. LOGIKA INTERPRETASI KLASTER & PREDIKSI (DIJAMIN 3 KATEGORI & AKURAT)
+# 4. KAMUS INFORMASI KLASTER STATIS (SINKRONISASI WARNA DAN TEKS)
 def get_cluster_static_info(category_name):
     if category_name == "Tinggi":
         return {
             "label": "🚀 High Achiever (Performa Tinggi)",
-            "desc": "Mahasiswa dengan kombinasi nilai kuis, midterm, dan final yang sangat baik serta kehadiran konsisten.",
-            "saran": "Pertahankan ritme belajar. Sangat direkomendasikan menjadi asisten dosen atau mentor sebaya.",
-            "color": "#2ecc71"
+            "desc": "Mahasiswa menunjukkan kombinasi performa nilai akademis yang sangat memuaskan di atas rata-rata kelas serta tingkat kehadiran yang sangat konsisten.",
+            "saran": "Pertahankan ritme belajar saat ini. Sangat direkomendasikan untuk menjadi asisten dosen atau mentor sebaya.",
+            "color": "#2ecc71" # Hijau
         }
     elif category_name == "Menengah":
         return {
             "label": "📊 Steady / Average (Performa Menengah)",
-            "desc": "Mahasiswa menunjukkan performa stabil di tingkat rata-rata, namun masih ada ruang evaluasi pada nilai ujian utama.",
-            "saran": "Fokus meningkatkan nilai ujian utama dan tugas harian untuk mengamankan nilai akhir.",
-            "color": "#f1c40f"
+            "desc": "Mahasiswa menunjukkan performa yang cukup stabil di tingkat rata-rata kelompok, namun masih memiliki ruang evaluasi pada nilai ujian utama.",
+            "saran": "Fokus meningkatkan pemahaman pada materi ujian tengah semester dan final untuk mendongkrak pencapaian nilai.",
+            "color": "#f1c40f" # Kuning
         }
     else: # Berisiko
         return {
             "label": "⚠️ Underperformer (Performa Berisiko)",
-            "desc": "Akumulasi perolehan nilai sangat rendah atau tingkat kehadiran di bawah standar minimal. Berisiko tinggi dropout.",
-            "saran": "Segera jadwalkan sesi bimbingan konseling akademik intensif untuk pemulihan nilai.",
-            "color": "#e74c3c"
+            "desc": "Akumulasi perolehan nilai berada di tingkat kritis atau di bawah standar minimal kelulusan. Risiko tinggi mengalami kendala studi.",
+            "saran": "Segera jadwalkan sesi bimbingan konseling akademik intensif bersama dosen wali untuk pemulihan nilai.",
+            "color": "#e74c3c" # Merah
         }
 
 # 5. SIDEBAR NAVIGATION
@@ -82,20 +82,19 @@ if model is None or scaler is None:
 else:
     features = ['quiz1_marks', 'quiz2_marks', 'quiz3_marks', 'midterm_marks', 'final_marks', 'previous_gpa', 'lectures_attended', 'labs_attended']
 
-    # --- MENU 1: DASHBOARD ANALISIS ---
+    # --- MENU 1: DASHBOARD ANALISIS MASSAL ---
     if menu == "🏠 Dashboard Analisis":
         st.title("📊 Dashboard Analisis Performa Mahasiswa")
         
         if uploaded_file is not None:
             df = pd.read_csv(uploaded_file)
             
-            # Preprocessing & Clustering data baru
+            # Preprocessing & Clustering data massal menggunakan K-Means (.pkl)
             df_clean = df[features].fillna(df[features].mean())
             scaled_data = scaler.transform(df_clean)
             df['Cluster'] = model.predict(scaled_data)
             
-            # PILAR UTAMA: Menentukan Label Cluster Berdasarkan Rata-rata Nilai Riil di CSV yang Diupload
-            # Ini menjamin 3 kategori (Tinggi, Menengah, Berisiko) PASTI muncul secara adil!
+            # Meranking performa cluster berdasarkan rata-rata nilai final asli dari CSV
             cluster_performance = df.groupby('Cluster')['final_marks'].mean().sort_values(ascending=False)
             cluster_ranks = cluster_performance.index.tolist()
             
@@ -108,7 +107,7 @@ else:
                 for idx, c_id in enumerate(cluster_ranks):
                     csv_mapping[c_id] = "Tinggi" if idx == 0 else "Menengah"
 
-            # Terapkan Label ke DataFrame
+            # Terapkan pemetaan label ke data tabular dashboard
             df['Kategori_Evaluasi'] = df['Cluster'].map(csv_mapping)
             df['Cluster_Name'] = df['Kategori_Evaluasi'].apply(lambda x: get_cluster_static_info(x)['label'])
             
@@ -119,25 +118,32 @@ else:
             m2.metric("Rata-rata Final", f"{df['final_marks'].mean():.1f}")
             m3.metric("Rata-rata IPK", f"{df['previous_gpa'].mean():.2f}")
             
-            # Menghitung jumlah kategori unik yang benar-benar terpetakan
             st_categories = df['Kategori_Evaluasi'].nunique()
             m4.metric("Kategori Terdeteksi", f"{st_categories} Kelompok")
             
             st.divider()
 
-            # PANEL VISUALISASI DATA
+            # PANEL VISUALISASI DATA GRAPH
             col_left, col_right = st.columns([6, 4])
             
             with col_left:
                 st.subheader("📍 Sebaran Cluster (Midterm vs Final)")
                 fig = px.scatter(df, x="midterm_marks", y="final_marks", color="Cluster_Name", 
-                                 template="none", color_discrete_sequence=["#2ecc71", "#f1c40f", "#e74c3c"])
+                                 template="none", color_discrete_map={
+                                     get_cluster_static_info("Tinggi")['label']: "#2ecc71",
+                                     get_cluster_static_info("Menengah")['label']: "#f1c40f",
+                                     get_cluster_static_info("Berisiko")['label']: "#e74c3c"
+                                 })
                 st.plotly_chart(fig, use_container_width=True)
 
             with col_right:
                 st.subheader("🥧 Proporsi Kelompok")
                 fig_pie = px.pie(df, names="Cluster_Name", hole=0.4, template="none",
-                                 color_discrete_sequence=["#2ecc71", "#f1c40f", "#e74c3c"])
+                                 color="Cluster_Name", color_discrete_map={
+                                     get_cluster_static_info("Tinggi")['label']: "#2ecc71",
+                                     get_cluster_static_info("Menengah")['label']: "#f1c40f",
+                                     get_cluster_static_info("Berisiko")['label']: "#e74c3c"
+                                 })
                 st.plotly_chart(fig_pie, use_container_width=True)
 
             st.subheader("📋 Eksplorasi Data Lengkap")
@@ -147,7 +153,7 @@ else:
         else:
             st.info("Silakan unggah dataset 'student_dropout_behavior_dataset.csv' pada sidebar untuk melihat analisis kelompok.")
 
-    # --- MENU 2: PREDIKSI INDIVIDU ---
+    # --- MENU 2: PREDIKSI INDIVIDU BARU (ANTI-BIAS / AMAN NYATA) ---
     else:
         st.title("🔍 Prediksi Kategori Mahasiswa")
         st.write("Masukkan parameter akademis mahasiswa di bawah ini untuk melihat hasil prediksi kelompok:")
@@ -168,27 +174,27 @@ else:
             submit = st.form_submit_button("🚀 Analisis Performa")
 
         if submit:
-            # 1. Kalkulasi Matematika Akademik Mandiri untuk Melindungi Deteksi Nilai Ekstrem (Seperti 0 semua)
+            # HITUNG TOTAL SKOR AKADEMIK SECARA RIIL (Maksimum Teoretis Dataset: 110)
             total_skor_ujian = fin + mid + (q1 + q2 + q3)
             
-            # Batas Threshold Akademik Riil Sesuai Karakteristik Dataset
-            if total_skor_ujian <= 40.0 or (fin == 0 and mid == 0):
+            # Sistem Pengondisian Batas Nilai Mutlak yang Sesuai Aturan Akademik Kelas
+            if (fin == 0 and mid == 0) or total_skor_ujian <= 45.0 or lec <= 4:
                 final_category = "Berisiko"
-            elif total_skor_ujian <= 75.0:
+            elif total_skor_ujian <= 76.0:
                 final_category = "Menengah"
             else:
                 final_category = "Tinggi"
             
-            # Panggil info visual berdasarkan kategori yang sudah di-double check keselarasannya
+            # Panggil informasi berdasarkan keputusan akhir klasifikasi yang adil
             info = get_cluster_static_info(final_category)
             
-            # Tampilan hasil prediksi berupa kartu berwarna yang informatif
+            # CETAK KARTU HASIL PREDIKSI BARU
             st.markdown(f"""
                 <div style="background-color:{info['color']}; padding:30px; border-radius:15px; text-align:center; color:white;">
                     <h1 style="color:white; margin:0;">{info['label']}</h1>
                     <p style="font-size:1.2em; margin:15px 0;">{info['desc']}</p>
                     <div style="background-color:rgba(0,0,0,0.15); padding:15px; border-radius:10px;">
-                        <b>💡 Rekomendasi:</b> {info['saran']}
+                        <b>💡 Rekomendasi UAS:</b> {info['saran']}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
