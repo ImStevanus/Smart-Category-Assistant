@@ -98,16 +98,15 @@ def get_cluster_static_info(category_name):
             "color": "#e74c3c"
         }
 
-# 5. SIDEBAR NAVIGATION & FITUR BARU: PILIH PARAMETER
+# 5. SIDEBAR NAVIGATION & KONFIGURASI MODEL GABUNGAN
 with st.sidebar:
     st.title("🎓 Smart Campus AI")
     st.markdown(f"User: **Stevanus**\n\nTema: **Academic Clustering**")
     st.divider()
     
-    # REKAYASA FITUR BARU BARU DI SINI:
     st.subheader("⚙️ Konfigurasi Model")
     parameter_mode = st.selectbox(
-        "Pilih Parameter Analisis:",
+        "Bobot Evaluasi Model:",
         ["Hanya Nilai Ujian (Mid & Final)", "Semua Parameter Akademik Terintegrasi"]
     )
     
@@ -122,13 +121,13 @@ if model is None or scaler is None:
 else:
     features = ['quiz1_marks', 'quiz2_marks', 'quiz3_marks', 'midterm_marks', 'final_marks', 'previous_gpa', 'lectures_attended', 'labs_attended']
     
-    # Jalankan pemetaan otomatis sesuai pilihan parameter di sidebar
+    # Jalankan pemetaan peringkat otomatis sesuai pilihan parameter di sidebar
     cluster_mapping = get_model_cluster_mapping(model, scaler, features, parameter_mode)
 
     # --- MENU 1: DASHBOARD ANALISIS MASSAL ---
     if menu == "🏠 Dashboard Analisis":
         st.title("📊 Dashboard Analisis Performa Mahasiswa")
-        st.info(f"💡 Mode Analisis Aktif: **{parameter_mode}**")
+        st.info(f"💡 Mode Evaluasi Model Aktif: **{parameter_mode}**")
         
         if uploaded_file is not None:
             df = pd.read_csv(uploaded_file)
@@ -153,13 +152,42 @@ else:
             
             st.divider()
 
-            # PANEL VISUALISASI DATA GRAPH
+            # FITUR BARU: DROP-DOWN INTERAKTIF PADA DASHBOARD UNTUK MEMILIH SUMBU GRAFIK
+            st.subheader("🎛️ Pengaturan Sumbu Visualisasi")
+            c_select1, c_select2 = st.columns(2)
+            with c_select1:
+                x_param = st.selectbox(
+                    "Pilih Parameter Sumbu X (Horizontal):",
+                    options=["quiz1_marks", "quiz2_marks", "quiz3_marks", "lectures_attended", "labs_attended", "midterm_marks"],
+                    index=3, # Default ke lectures_attended
+                    format_func=lambda x: {
+                        "quiz1_marks": "📝 Nilai Quiz 1",
+                        "quiz2_marks": "📝 Nilai Quiz 2",
+                        "quiz3_marks": "📝 Nilai Quiz 3",
+                        "lectures_attended": "📅 Kehadiran Kuliah (Lectures)",
+                        "labs_attended": "🧪 Kehadiran Praktikum (Labs)",
+                        "midterm_marks": "📉 Nilai Midterm Exam"
+                    }.get(x)
+                )
+            with c_select2:
+                y_param = st.selectbox(
+                    "Pilih Parameter Sumbu Y (Vertikal):",
+                    options=["final_marks", "previous_gpa"],
+                    index=0, # Default ke final_marks
+                    format_func=lambda x: {
+                        "final_marks": "📊 Nilai Final Exam",
+                        "previous_gpa": "📈 IPK Sebelumnya (GPA)"
+                    }.get(x)
+                )
+
+            # PANEL VISUALISASI DATA GRAPH (DINAMIS MENGIKUTI DROP DOWN)
             col_left, col_right = st.columns([6, 4])
             
             with col_left:
-                st.subheader("📍 Sebaran Cluster (Midterm vs Final)")
-                fig = px.scatter(df, x="midterm_marks", y="final_marks", color="Cluster_Name", 
-                                 template="none", color_discrete_map={
+                st.markdown(f"##### 📍 Sebaran Cluster Berdasarkan Pilihan Parameter")
+                fig = px.scatter(df, x=x_param, y=y_param, color="Cluster_Name", 
+                                 template="none", labels={x_param: "Parameter X", y_param: "Parameter Y"},
+                                 color_discrete_map={
                                      get_cluster_static_info("Tinggi")['label']: "#2ecc71",
                                      get_cluster_static_info("Menengah")['label']: "#f1c40f",
                                      get_cluster_static_info("Berisiko")['label']: "#e74c3c"
@@ -167,7 +195,7 @@ else:
                 st.plotly_chart(fig, use_container_width=True)
 
             with col_right:
-                st.subheader("🥧 Proporsi Kelompok")
+                st.markdown("##### 🥧 Proporsi Kelompok Mahasiswa")
                 fig_pie = px.pie(df, names="Cluster_Name", hole=0.4, template="none",
                                  color="Cluster_Name", color_discrete_map={
                                      get_cluster_static_info("Tinggi")['label']: "#2ecc71",
@@ -212,15 +240,13 @@ else:
             
             # LOGIKA ADAPTIF UNTUK INPUT NILAI EKSTREM (Quiz 0 & Final 0)
             if parameter_mode == "Hanya Nilai Ujian (Mid & Final)":
-                # Proteksi khusus jika hanya mengukur Mid & Final
                 if fin == 0 and mid == 0:
                     assigned_category = "Berisiko"
                 else:
                     assigned_category = cluster_mapping.get(predicted_cluster, "Menengah")
             else:
-                # Proteksi jika mengukur semua parameter gabungan
                 total_skor = fin + mid + q1 + q2 + q3
-                if total_skor <= 45.0 or (fin == 0 and mid == 0):
+                if total_skor <= 45.0 or (fin == 0 and mid == 0) or lec <= 3:
                     assigned_category = "Berisiko"
                 else:
                     assigned_category = cluster_mapping.get(predicted_cluster, "Menengah")
